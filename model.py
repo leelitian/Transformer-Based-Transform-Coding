@@ -29,7 +29,7 @@ class SwinHyperprior(CompressionModel):
 
         self.g_a = nn.Sequential(
             # stage 1
-            PatchMerging(dims=(3, self.channels[0])),
+            PatchMerging(dims=(3, self.channels[0]), norm_layer=None),
             *[SwinTransformerBlock(dim=self.channels[0],
                                    num_heads=self.num_heads[0], window_size=self.window_sizes[0],
                                    shift_size=0 if (i % 2 == 0) else self.window_sizes[0] // 2) for i in range(self.depths[0])],
@@ -96,11 +96,10 @@ class SwinHyperprior(CompressionModel):
             *[SwinTransformerBlock(dim=self.channels[0],
                                    num_heads=self.num_heads[0], window_size=self.window_sizes[0],
                                    shift_size=0 if (i % 2 == 0) else self.window_sizes[0] // 2) for i in range(self.depths[0])],
-            PatchSplitting(dims=(self.channels[0], 3)),
+            PatchSplitting(dims=(self.channels[0], 3), norm_layer=None),
         )
 
     def forward(self, x):
-        _, _, H, W = x.shape
         x = x.permute(0, 2, 3, 1)           # B, H, W, C
         y = self.g_a(x)
         z = self.h_a(y)
@@ -121,6 +120,41 @@ class SwinHyperprior(CompressionModel):
             "x_hat": x_hat,
             "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
         }
+
+    def compress(self, x):
+        x = x.permute(0, 2, 3, 1)
+        y = self.g_a(x)
+        z = self.h_a(y)
+
+        z = z.permute(0, 3, 1, 2)
+        z_strings = self.entropy_bottleneck.compress(z)
+        z_hat = self.entropy_bottleneck.decompress(z_strings, z.size()[-2:])
+        z_hat = z_hat.permute(0, 2, 3, 1)
+
+        gaussian_params = self.h_s(z_hat)
+        scales_hat, means_hat = gaussian_params.chunk(2, dim=-1)
+        indexes = self.gaussian_conditional.build_indexes(scales_hat)
+        y_strings = self.gaussian_conditional.compress(y, indexes, means=means_hat)
+        
+        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+
+    def decompress(self, strings, shape):
+        assert isinstance(strings, list) and len(strings) == 2
+
+        z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
+        z_hat = z_hat.permute(0, 2, 3, 1)
+
+        gaussian_params = self.h_s(z_hat)
+        scales_hat, means_hat = gaussian_params.chunk(2, dim=-1)
+        indexes = self.gaussian_conditional.build_indexes(scales_hat)
+        y_hat = self.gaussian_conditional.decompress(
+            strings[0], indexes, means=means_hat
+        )
+        
+        x_hat = self.g_s(y_hat).clamp_(0, 1)
+        x_hat = x_hat.permute(0, 3, 1, 2)
+
+        return {"x_hat": x_hat}
 
     def load_state_dict(self, state_dict):
         update_registered_buffers(

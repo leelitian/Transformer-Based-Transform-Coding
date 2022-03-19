@@ -18,21 +18,15 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         # codec
-        # out = net.compress(x)
-        # rec = net.decompress(out['strings'], out['shape'])
-        # rec = transforms.ToPILImage()(rec['x_hat'].squeeze().cpu())
-        # rec.save('./images/codec.png', format="PNG")
+        out = net.compress(x)
+        rec = net.decompress(out['strings'], out['shape'])
+        rec = transforms.ToPILImage()(rec['x_hat'].squeeze().cpu())
+        rec.save('./images/codec.png', format="PNG")
 
         # inference
-        x = x.permute(0, 2, 3, 1)
-        y = net.g_a(x)
-        x_hat = net.g_s(y)
-        x_hat = x_hat.permute(0, 3, 1, 2).clamp(0, 1)
-        rec = transforms.ToPILImage()(x_hat.squeeze().cpu())
-
-        # out = net(x)
-        # rec = out['x_hat'].clamp(0, 1)
-        # rec = transforms.ToPILImage()(rec.squeeze().cpu())
+        out = net(x)
+        rec = out['x_hat'].clamp(0, 1)
+        rec = transforms.ToPILImage()(rec.squeeze().cpu())
         rec.save('./images/infer.png', format="PNG")
 
         print('saved in ./images')

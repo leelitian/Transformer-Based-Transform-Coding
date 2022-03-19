@@ -278,7 +278,11 @@ class PatchMerging(nn.Module):
         super().__init__()
         self.dims = dims
         self.reduction = nn.Linear(4 * dims[0], dims[1], bias=False)
-        self.norm = norm_layer(4 * dims[0])
+        
+        if norm_layer:
+            self.norm = norm_layer(4 * dims[0])
+        else:
+            self.norm = None
 
     def forward(self, x):
         """
@@ -296,7 +300,8 @@ class PatchMerging(nn.Module):
         x3 = x[:, 1::2, 1::2, :]  # B H/2 W/2 C
         x = torch.cat([x0, x1, x2, x3], -1)  # B H/2 W/2 4*C
 
-        x = self.norm(x)
+        if self.norm:
+            x = self.norm(x)
         x = self.reduction(x)
 
         return x
@@ -310,8 +315,12 @@ class PatchSplitting(nn.Module):
     def __init__(self, dims, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dims = dims
-        self.increase = nn.Linear(dims[0] // 4, dims[1], bias=False)
-        self.norm = norm_layer(dims[0] // 4)
+        self.increase = nn.Linear(dims[0], 4 * dims[1], bias=False)
+
+        if norm_layer:
+            self.norm = norm_layer(4 * dims[1])
+        else:
+            self.norm = None
 
     def forward(self, x):
         """
@@ -322,9 +331,10 @@ class PatchSplitting(nn.Module):
         assert L == H * W, "input feature has wrong size"
         assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
 
-        x = rearrange(x, 'b h1 w1 (c h2 w2) -> b (h1 h2) (w1 w2) c', h2=2, w2=2)
-        x = self.norm(x)
         x = self.increase(x)
+        if self.norm:
+            x = self.norm(x)
+        x = rearrange(x, 'b h w (p1 p2 c) -> b (h p1) (w p2) c', p1=2, p2=2)
 
         return x
 
